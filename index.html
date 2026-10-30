@@ -251,11 +251,11 @@ if(explorePeople){const extra=document.createElement('div');extra.className='pan
  let selectedFile=null;
  const saveMedia=async(file,caption,type='post')=>{
   if(!file)return;
-  const item={id:'m'+Date.now()+Math.random().toString(16).slice(2),blob:file,caption:caption||'',kind:file.type.startsWith('video/')?'video':'image',type,created:Date.now(),likes:0};
+  const item={id:'m'+Date.now()+Math.random().toString(16).slice(2),blob:file,caption:caption||'',kind:file.type.startsWith('video/')?'video':file.type.startsWith('image/')?'image':'text',type,created:Date.now(),likes:0};
   await storeItem(item);renderAll();toast(type==='story'?'Historia publicada en este dispositivo.':type==='reel'?'Reel publicado en este dispositivo.':'Publicación compartida en este dispositivo.');
  };
  const mediaElement=item=>{
-  const el=document.createElement(item.kind==='video'?'video':'img');
+  if(item.kind==='text'){const p=document.createElement('p');p.className='media-post';p.textContent=item.caption;return p}const el=document.createElement(item.kind==='video'?'video':'img');
   el.className=item.type==='reel'?'':'media-post';el.src=urlFor(item.blob);
   if(item.kind==='video'){el.controls=true;el.playsInline=true}
   else el.alt='Contenido multimedia publicado en ERA';
@@ -279,10 +279,10 @@ if(explorePeople){const extra=document.createElement('div');extra.className='pan
   items.filter(x=>x.type==='reel').forEach(item=>{const wrap=document.createElement('div');wrap.className='media-card';const video=mediaElement(item);video.className='media-post';wrap.append(video);if(item.caption){const p=document.createElement('p');p.textContent=item.caption;wrap.append(p)}$('#eraReelGallery').append(wrap)});
  };
  function openViewer(item){const overlay=document.createElement('div');overlay.className='camera-box';const inner=document.createElement('div');inner.className='camera-inner';const close=document.createElement('button');close.className='btn';close.textContent='Cerrar';close.onclick=()=>overlay.remove();inner.append(close,mediaElement(item));overlay.append(inner);document.body.append(overlay)}
- $('#eraUpload').addEventListener('change',e=>{selectedFile=e.target.files[0]||null;if(selectedFile){const cap=prompt('Añade una descripción para tu publicación:')||'';saveMedia(selectedFile,cap,'post')}e.target.value=''});
+ $('#eraUpload').addEventListener('change',e=>{selectedFile=e.target.files[0]||null;if(selectedFile){const cap=prompt('Añade una descripción para tu publicación:')||'';const type=e.target.dataset.next==='story'?'story':'post';saveMedia(selectedFile,cap,type);delete e.target.dataset.next}e.target.value=''});
  publish.addEventListener('click',async()=>{const caption=draft.value.trim();if(!caption){toast('Escribe una descripción o selecciona una foto/video.');return}await saveMedia(new Blob([caption],{type:'text/plain'}),caption,'post');const items=await getItems();const last=items[0];if(last?.blob.type==='text/plain'){last.kind='text';await storeItem(last)}draft.value=''});
- $('#eraStory').addEventListener('click',()=>{$('#eraUpload').click();$('#eraUpload').dataset.next='story'});
- $('#eraUpload').addEventListener('change',e=>{const f=e.target.files[0];if(f&&e.target.dataset.next==='story'){saveMedia(f,'Historia de ERA','story');delete e.target.dataset.next}});
+ $('#eraStory').addEventListener('click',()=>{$('#eraUpload').dataset.next='story';$('#eraUpload').click()});
+
  $('#eraReelUpload').addEventListener('change',e=>{const f=e.target.files[0];if(f)saveMedia(f,'Reel histórico','reel');e.target.value=''});
  const closeCamera=()=>{cameraStream?.getTracks().forEach(t=>t.stop());cameraStream=null;cameraLayer.classList.add('hidden');$('#eraCameraVideo').srcObject=null};
  $('#eraCamera').onclick=async()=>{try{cameraLayer.classList.remove('hidden');cameraStream=await navigator.mediaDevices.getUserMedia({video:true,audio:true});$('#eraCameraVideo').srcObject=cameraStream}catch(err){closeCamera();toast('No se pudo abrir la cámara. Revisa los permisos del navegador y que uses HTTPS.')}};
