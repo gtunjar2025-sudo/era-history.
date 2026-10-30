@@ -40,6 +40,20 @@
 .chat-search{padding:10px;border-bottom:1px solid var(--line)}
 .chat-search input{margin:0}
 @media(max-width:650px){.chatapp{grid-template-columns:1fr}.chatlist{max-height:210px;overflow:auto}.chatwindow{min-height:460px}.chatlog{max-height:330px}}
+
+/* ERA 4.0: herramientas multimedia */
+.media-tools{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+.media-preview{width:100%;max-height:440px;object-fit:contain;border-radius:14px;background:#171020;margin-top:10px}
+.media-post{width:100%;max-height:520px;object-fit:contain;border-radius:14px;background:#171020;margin-top:12px}
+.upload-label{display:inline-flex;align-items:center;gap:7px;padding:9px 13px;border-radius:10px;background:var(--pale);color:var(--purple);font-weight:750;cursor:pointer}
+.media-card{background:white;border:1px solid var(--line);border-radius:16px;padding:13px;margin:12px 0}
+.camera-box{position:fixed;inset:0;background:#130e1dcc;z-index:50;display:grid;place-items:center;padding:15px}
+.camera-inner{background:white;border-radius:18px;padding:15px;width:min(650px,100%)}
+.camera-inner video{width:100%;max-height:65vh;background:#111;border-radius:12px}
+.media-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+.media-grid video,.media-grid img{width:100%;max-height:340px;object-fit:contain;background:#171020;border-radius:12px}
+@media(max-width:650px){.media-grid{grid-template-columns:1fr}}
+
 </style></head>
 <body><div class="layout">
 <aside class="side"><div class="brand">ERA</div><p class="motto">LA HISTORIA TAMBIÉN SE COMPARTE</p><nav class="nav" id="nav">
@@ -200,4 +214,83 @@ renderCharacterList();selectCharacter(activeCharacter.id);
 /* Incluir los 20 perfiles en Explorar, sin alterar la lista de perfiles originales */
 const explorePeople=$('#people');
 if(explorePeople){const extra=document.createElement('div');extra.className='panel';extra.innerHTML='<h3>Personajes para conversar</h3><p class="muted">20 perspectivas históricas, con sus propios contextos y relaciones.</p>';characters.forEach(ch=>{const row=document.createElement('div');row.className='person';const av=document.createElement('div');av.className='avatar';av.textContent=ch.initials;const info=document.createElement('div');const name=document.createElement('b');name.textContent=ch.name;const meta=document.createElement('div');meta.className='muted';meta.textContent=ch.role+' · '+ch.era;info.append(name,meta);const go=document.createElement('button');go.className='btn';go.textContent='Conversar';go.onclick=()=>{showPage('mensajes');selectCharacter(ch.id)};row.append(av,info,go);extra.append(row)});explorePeople.append(extra)}
+
+/* ERA 4.0 — publicaciones multimedia locales */
+(()=>{
+ const $=s=>document.querySelector(s);
+ const dbName='ERA_Media_DB';
+ let db=null, cameraStream=null, recorder=null, recordedChunks=[];
+ const openDB=()=>new Promise((resolve,reject)=>{
+  const req=indexedDB.open(dbName,1);
+  req.onupgradeneeded=()=>{if(!req.result.objectStoreNames.contains('items'))req.result.createObjectStore('items',{keyPath:'id'})};
+  req.onsuccess=()=>{db=req.result;resolve(db)};req.onerror=()=>reject(req.error);
+ });
+ const storeItem=item=>new Promise((resolve,reject)=>{const tx=db.transaction('items','readwrite');tx.objectStore('items').put(item);tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error)});
+ const getItems=()=>new Promise((resolve,reject)=>{const tx=db.transaction('items','readonly');const q=tx.objectStore('items').getAll();q.onsuccess=()=>resolve(q.result.sort((a,b)=>b.created-a.created));q.onerror=()=>reject(q.error)});
+ const urlFor=blob=>URL.createObjectURL(blob);
+ const safe=s=>String(s||'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+ const toast=msg=>{const t=$('#toast');if(t){t.textContent=msg;t.classList.remove('hidden');setTimeout(()=>t.classList.add('hidden'),2600)}};
+ const composer=$('#inicio .composer');
+ if(!composer)return;
+ const tools=document.createElement('div');tools.className='media-tools';tools.innerHTML=
+  '<label class="upload-label">▧ Subir foto/video<input id="eraUpload" type="file" accept="image/*,video/*" hidden></label>'+
+  '<button class="btn" id="eraCamera">◉ Abrir cámara</button>'+
+  '<button class="btn" id="eraStory">＋ Crear historia</button>';
+ composer.append(tools);
+ const draft=$('#postDraft');
+ const publish=$('#publishPost');
+ const cameraLayer=document.createElement('div');cameraLayer.className='camera-box hidden';cameraLayer.id='eraCameraLayer';
+ cameraLayer.innerHTML='<div class="camera-inner"><div style="display:flex;justify-content:space-between;align-items:center"><b>Cámara ERA</b><button class="btn" id="eraCameraClose">Cerrar ✕</button></div><p class="muted">Permite el acceso a la cámara y al micrófono cuando el navegador lo solicite.</p><video id="eraCameraVideo" autoplay muted playsinline></video><div class="media-tools"><button class="btn" id="eraPhoto">Tomar foto</button><button class="btn" id="eraRecord">● Grabar video</button><button class="btn" id="eraStop" disabled>■ Detener</button></div><canvas id="eraCanvas" class="hidden"></canvas></div>';
+ document.body.append(cameraLayer);
+ const stories=$('#inicio .stories');
+ const userStories=document.createElement('div');userStories.id='eraUserStories';userStories.className='stories';userStories.innerHTML='<div class="muted">Tus historias aparecerán aquí.</div>';stories?.after(userStories);
+ const feed=document.createElement('div');feed.id='eraMediaFeed';composer.after(feed);
+ const reelsPage=$('#reels .panel');
+ const reelUploads=document.createElement('div');reelUploads.className='panel';reelUploads.innerHTML='<h2>Crear un reel</h2><p class="muted">Sube un video vertical desde tu dispositivo. Los reels se guardan en este navegador.</p><label class="upload-label">＋ Seleccionar video<input id="eraReelUpload" type="file" accept="video/*" hidden></label><div id="eraReelGallery" class="media-grid"></div>';
+ reelsPage?.append(reelUploads);
+ let selectedFile=null;
+ const saveMedia=async(file,caption,type='post')=>{
+  if(!file)return;
+  const item={id:'m'+Date.now()+Math.random().toString(16).slice(2),blob:file,caption:caption||'',kind:file.type.startsWith('video/')?'video':'image',type,created:Date.now(),likes:0};
+  await storeItem(item);renderAll();toast(type==='story'?'Historia publicada en este dispositivo.':type==='reel'?'Reel publicado en este dispositivo.':'Publicación compartida en este dispositivo.');
+ };
+ const mediaElement=item=>{
+  const el=document.createElement(item.kind==='video'?'video':'img');
+  el.className=item.type==='reel'?'':'media-post';el.src=urlFor(item.blob);
+  if(item.kind==='video'){el.controls=true;el.playsInline=true}
+  else el.alt='Contenido multimedia publicado en ERA';
+  return el;
+ };
+ const renderAll=async()=>{
+  const items=await getItems();feed.innerHTML='';$('#eraReelGallery').innerHTML='';userStories.innerHTML='';
+  const storiesItems=items.filter(x=>x.type==='story');
+  if(!storiesItems.length)userStories.innerHTML='<div class="muted">Tus historias aparecerán aquí.</div>';
+  storiesItems.forEach(item=>{const s=document.createElement('div');s.className='story';const av=document.createElement('div');av.className='avatar';av.textContent='TÚ';s.append(av,document.createTextNode('Tu historia'));s.onclick=()=>openViewer(item);userStories.append(s)});
+  items.filter(x=>x.type==='post').forEach(item=>{
+   const card=document.createElement('article');card.className='post';
+   const head=document.createElement('div');head.className='posthead';head.innerHTML='<div class="avatar">TÚ</div><div><b>Tu perfil</b><div class="muted">Publicado en este dispositivo · '+new Date(item.created).toLocaleString()+'</div></div>';
+   card.append(head);if(item.caption){const p=document.createElement('p');p.textContent=item.caption;card.append(p)}
+   card.append(mediaElement(item));
+   const actions=document.createElement('div');actions.className='actions';
+   const like=document.createElement('button');like.className='btn';like.textContent='♡ Me gusta '+(item.likes||0);like.onclick=async()=>{item.likes=(item.likes||0)+1;await storeItem(item);like.textContent='♥ Me gusta '+item.likes};
+   const comment=document.createElement('button');comment.className='btn';comment.textContent='Comentar';comment.onclick=()=>{const v=prompt('Escribe tu comentario:');if(v?.trim())toast('Comentario de prueba añadido en esta sesión.')};
+   actions.append(like,comment);card.append(actions);feed.append(card);
+  });
+  items.filter(x=>x.type==='reel').forEach(item=>{const wrap=document.createElement('div');wrap.className='media-card';const video=mediaElement(item);video.className='media-post';wrap.append(video);if(item.caption){const p=document.createElement('p');p.textContent=item.caption;wrap.append(p)}$('#eraReelGallery').append(wrap)});
+ };
+ function openViewer(item){const overlay=document.createElement('div');overlay.className='camera-box';const inner=document.createElement('div');inner.className='camera-inner';const close=document.createElement('button');close.className='btn';close.textContent='Cerrar';close.onclick=()=>overlay.remove();inner.append(close,mediaElement(item));overlay.append(inner);document.body.append(overlay)}
+ $('#eraUpload').addEventListener('change',e=>{selectedFile=e.target.files[0]||null;if(selectedFile){const cap=prompt('Añade una descripción para tu publicación:')||'';saveMedia(selectedFile,cap,'post')}e.target.value=''});
+ publish.addEventListener('click',async()=>{const caption=draft.value.trim();if(!caption){toast('Escribe una descripción o selecciona una foto/video.');return}await saveMedia(new Blob([caption],{type:'text/plain'}),caption,'post');const items=await getItems();const last=items[0];if(last?.blob.type==='text/plain'){last.kind='text';await storeItem(last)}draft.value=''});
+ $('#eraStory').addEventListener('click',()=>{$('#eraUpload').click();$('#eraUpload').dataset.next='story'});
+ $('#eraUpload').addEventListener('change',e=>{const f=e.target.files[0];if(f&&e.target.dataset.next==='story'){saveMedia(f,'Historia de ERA','story');delete e.target.dataset.next}});
+ $('#eraReelUpload').addEventListener('change',e=>{const f=e.target.files[0];if(f)saveMedia(f,'Reel histórico','reel');e.target.value=''});
+ const closeCamera=()=>{cameraStream?.getTracks().forEach(t=>t.stop());cameraStream=null;cameraLayer.classList.add('hidden');$('#eraCameraVideo').srcObject=null};
+ $('#eraCamera').onclick=async()=>{try{cameraLayer.classList.remove('hidden');cameraStream=await navigator.mediaDevices.getUserMedia({video:true,audio:true});$('#eraCameraVideo').srcObject=cameraStream}catch(err){closeCamera();toast('No se pudo abrir la cámara. Revisa los permisos del navegador y que uses HTTPS.')}};
+ $('#eraCameraClose').onclick=closeCamera;
+ $('#eraPhoto').onclick=async()=>{const v=$('#eraCameraVideo'),c=$('#eraCanvas');c.width=v.videoWidth;c.height=v.videoHeight;c.getContext('2d').drawImage(v,0,0);c.toBlob(async blob=>{if(blob)await saveMedia(blob,'Foto tomada con la cámara','post')},'image/jpeg',.9)};
+ $('#eraRecord').onclick=()=>{if(!cameraStream)return;recordedChunks=[];try{recorder=new MediaRecorder(cameraStream);recorder.ondataavailable=e=>{if(e.data.size)recordedChunks.push(e.data)};recorder.onstop=async()=>{const blob=new Blob(recordedChunks,{type:recorder.mimeType||'video/webm'});await saveMedia(blob,'Video grabado con la cámara','post');$('#eraRecord').disabled=false;$('#eraStop').disabled=true};recorder.start();$('#eraRecord').disabled=true;$('#eraStop').disabled=false}catch(e){toast('Este navegador no permite grabar video con esta configuración.')}};
+ $('#eraStop').onclick=()=>{if(recorder?.state==='recording')recorder.stop()};
+ openDB().then(renderAll).catch(()=>toast('No se pudo activar el almacenamiento multimedia del navegador.'));
+})();
+
 </script></body></html>
